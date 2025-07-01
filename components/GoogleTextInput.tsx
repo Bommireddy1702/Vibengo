@@ -1,107 +1,109 @@
-import { GoogleInputProps } from "@/types/type";
-import { useState } from "react";
+import { useUser } from "@clerk/clerk-expo";
+import { useAuth } from "@clerk/clerk-expo";
+import * as Location from "expo-location";
+import { router } from "expo-router";
+import { useState, useEffect } from "react";
 import {
-  FlatList,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
+  TouchableOpacity,
+  Image,
+  ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import GoogleTextInput from "@/components/GoogleTextInput";
+import Map from "@/components/Map";
+import { icons } from "@/constants";
+import { useLocationStore } from "@/store";
 
-// Make sure this env var is set correctly in your .env or app config
-const apiKey = process.env.EXPO_PUBLIC_GOOGLE_API_KEY;
+export default function Page() {
+  const { signOut } = useAuth();
+  const { setUserLocation, setDestinationLocation } = useLocationStore();
+  const { user } = useUser();
 
-type PlacePrediction = {
-  place_id: string;
-  description: string;
-};
+  const [hasPermission, setHasPermission] = useState<boolean>(false);
 
-const GoogleTextInput = ({
-  icon,
-  initialLocation,
-  containerStyle,
-  textInputBackgroundColor,
-  handlePress,
-}: GoogleInputProps) => {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<PlacePrediction[]>([]); // ✅ typed array
-
-  const fetchPlaces = async (text: string) => {
-    setQuery(text);
-    if (text.length < 2) {
-      setResults([]);
-      return;
-    }
-
-    try {
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${text}&key=${apiKey}&language=en`
-      );
-      const json = await res.json();
-      setResults(json.predictions || []);
-    } catch (error) {
-      console.error("Autocomplete API failed:", error);
-    }
+  const handleSignOut = () => {
+    signOut();
+    router.replace("/(auth)/sign-in");
   };
 
-  const handleSelect = async (placeId: string, description: string) => {
-    try {
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${apiKey}`
-      );
-      const json = await res.json();
-      const location = json.result.geometry.location;
+  const handleDestinationPress = (location: {
+    latitude: number;
+    longitude: number;
+    address: string;
+  }) => {
+    setDestinationLocation(location);
+    router.push("/(root)/find-ride");
+  };
 
-      handlePress({
-        latitude: location.lat,
-        longitude: location.lng,
-        address: description,
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setHasPermission(false);
+        return;
+      }
+
+      let location = await Location.getCurrentPositionAsync({});
+      const address = await Location.reverseGeocodeAsync({
+        latitude: location.coords?.latitude!,
+        longitude: location.coords?.longitude!,
       });
 
-      setQuery(description);
-      setResults([]);
-    } catch (error) {
-      console.error("Details API failed:", error);
-    }
-  };
+      setUserLocation({
+        latitude: location.coords?.latitude,
+        longitude: location.coords?.longitude,
+        address: `${address[0].name}, ${address[0].region}`,
+      });
+    })();
+  }, []);
 
   return (
-    <View
-      style={{
-        backgroundColor: "white",
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 16,
-      }}
-    >
-      <TextInput
-        value={query}
-        placeholder={initialLocation ?? "Search for a location"}
-        onChangeText={fetchPlaces}
-        placeholderTextColor="gray"
-        style={{
-          padding: 10,
-          backgroundColor: textInputBackgroundColor ?? "#f9f9f9",
-          borderRadius: 10,
-          fontSize: 16,
-          fontWeight: "500",
-        }}
-      />
-
-      <FlatList
-        data={results}
-        keyExtractor={(item) => item.place_id}
-        renderItem={({ item }) => (
+    <SafeAreaView className="bg-general-500 flex-1">
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+      >
+        {/* --- HEADER START --- */}
+        <View className="flex flex-row items-center justify-between my-5">
+          <Text className="text-2xl font-JakartaExtraBold">
+            Welcome {user?.firstName || user?.emailAddresses[0].emailAddress.split('@')[0]} 👋
+          </Text>
           <TouchableOpacity
-            style={{ paddingVertical: 10 }}
-            onPress={() => handleSelect(item.place_id, item.description)}
+            onPress={handleSignOut}
+            className="justify-center items-center w-10 h-10 rounded-full bg-white"
           >
-            <Text style={{ fontSize: 15 }}>{item.description}</Text>
+            <Image source={icons.out} className="w-4 h-4" />
           </TouchableOpacity>
-        )}
-      />
-    </View>
-  );
-};
+        </View>
+        {/* --- HEADER END --- */}
 
-export default GoogleTextInput;
+        {/* --- DESTINATION SECTION --- */}
+        <View className="mt-2">
+          <Text className="text-lg font-JakartaBold mb-2 text-black">
+            Select Destination Location
+          </Text>
+          <GoogleTextInput
+            icon={icons.search} // search icon shown inside the text input
+            containerStyle="bg-white shadow-md shadow-neutral-300"
+            handlePress={handleDestinationPress}
+          />
+        </View>
+
+        {/* --- CURRENT LOCATION LABEL WITH ICON --- */}
+        <View className="flex flex-row items-center mt-2 mb-3">
+          <Text className="text-xl font-JakartaBold mr-2">
+            Your current location
+          </Text>
+          <Image source={icons.map} className="w-6 h-6" />
+        </View>
+
+        {/* --- MAP --- */}
+        <View className="flex flex-row items-center bg-transparent h-[400px]">
+          <Map />
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
